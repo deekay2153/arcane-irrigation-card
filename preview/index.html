@@ -1,0 +1,122 @@
+<!doctype html>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Arcane Irrigation Card preview</title>
+<style>body{margin:0;background:#111;font-family:system-ui}#bar{min-height:56px;background:#1c2530;color:#9ab;display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:6px 12px;font-size:13px;box-sizing:border-box}#bar button,#bar a{padding:6px 10px;font:inherit}#bar a{color:#62c8f5}</style>
+<div id="bar">Preview (mock data):
+  <a href="?">Full</a><a href="?config=plain">Zones only</a><a href="?config=four">Four yards</a> |
+  <button data-m="rain">Rain</button><button data-m="sun">Sunny</button><button data-m="night">Night</button>
+  <button data-m="run">Run first</button><button data-m="idle">Idle</button>
+  <button data-m="water">Verdict water</button><button data-m="skip">Verdict skip</button></div>
+<arcane-irrigation-card id="c"></arcane-irrigation-card>
+<script type="module">
+import '../dist/arcane-irrigation-card.js';
+// Mock Home Assistant for working on the card without one. Not part of the card.
+const st = (state, attributes = {}) => ({ state: String(state), attributes, last_updated: new Date().toISOString(), last_changed: new Date().toISOString() });
+const mode = new URLSearchParams(location.search).get('config') || 'full';
+const ZONES = {
+  full: [
+    { entity: 'switch.back_lawn', name: 'Back lawn', scene: 'back_grass', remaining: 'sensor.back_lawn_time_left', battery: 'sensor.back_lawn_battery', status: 'sensor.back_lawn_status' },
+    { entity: 'valve.front_beds', name: 'Front beds', scene: 'front_garden', remaining: 'sensor.front_beds_time_left', battery: 'sensor.front_beds_battery' },
+  ],
+  plain: [
+    { entity: 'switch.back_lawn', name: 'Back lawn', scene: 'back_grass' },
+    { entity: 'valve.front_beds', name: 'Front beds', scene: 'front_grass' },
+  ],
+  four: [
+    { entity: 'switch.back_lawn', name: 'Back lawn', scene: 'back_grass', remaining: 'sensor.back_lawn_time_left' },
+    { entity: 'valve.front_beds', name: 'Front beds', scene: 'front_garden' },
+    { entity: 'switch.side_path', name: 'Side path', scene: 'side_grass' },
+    { entity: 'switch.orchard', name: 'Orchard', scene: 'back_garden' },
+  ],
+};
+const FULL = {
+  title: 'Garden', weather: 'weather.home', max_temp: 'sensor.todays_high',
+  automatic: 'input_boolean.irrigation_automatic', season: 'input_select.irrigation_season', minutes: 'input_number.irrigation_minutes',
+  times: [{ name: 'Morning', entity: 'input_datetime.irrigation_morning' }, { name: 'Evening', entity: 'input_datetime.irrigation_evening' }],
+  next_run: 'sensor.irrigation_next_run', verdict: 'sensor.irrigation_verdict', reason: 'sensor.irrigation_reason',
+  log: 'input_text.irrigation_last_event', hold: 'input_datetime.irrigation_hold_until', queue: 'input_text.irrigation_queue',
+  scripts: { run: 'script.irrigation_run', stop: 'script.irrigation_stop', skip: 'script.irrigation_skip_today', resume: 'script.irrigation_resume', start_now: 'script.irrigation_start_now' },
+  rain_rules: [
+    { name: 'Forecast rain today', sensor: 'sensor.rain_forecast_today', threshold: 'input_number.irrigation_skip_rain_mm', max: 40 },
+    { name: 'Chance of rain', sensor: 'sensor.rain_chance_today', threshold: 'input_number.irrigation_skip_rain_chance' },
+    { name: 'Fallen since 9am', sensor: 'sensor.rain_since_9am', threshold: 'input_number.irrigation_skip_rain_fallen', max: 40 },
+  ],
+};
+const config = mode === 'full' ? { ...FULL, zones: ZONES.full } : mode === 'four' ? { weather: 'weather.home', zones: ZONES.four } : { zones: ZONES.plain };
+const ids = ZONES[mode].map(z => z.entity);
+const S = {
+  'weather.home': st('rainy'), 'sun.sun': st('above_horizon'), 'sensor.todays_high': st('24', { unit_of_measurement: '°C' }),
+  'input_boolean.irrigation_automatic': st('on'), 'input_select.irrigation_season': st('Summer', { options: ['Summer', 'In-between', 'Winter'] }),
+  'input_number.irrigation_minutes': st('15.0', { min: 1, max: 60, step: 1 }),
+  'input_datetime.irrigation_morning': st('06:30:00'), 'input_datetime.irrigation_evening': st('18:30:00'),
+  'sensor.irrigation_next_run': st(new Date(new Date().setHours(18, 30, 0, 0)).toISOString()),
+  'sensor.irrigation_verdict': st('skip'), 'sensor.irrigation_reason': st('Skip: 9–20 mm forecast today at 90% chance'),
+  'input_text.irrigation_last_event': st('Morning run 06:30: Back lawn 15 min, Front beds 15 min'),
+  'input_datetime.irrigation_hold_until': st('2026-01-01'), 'input_text.irrigation_queue': st(''),
+  'script.irrigation_run': st('off'),
+  'sensor.rain_forecast_today': st('9–20', { unit_of_measurement: 'mm' }), 'input_number.irrigation_skip_rain_mm': st('10.0', { min: 1, max: 40, step: 1 }),
+  'sensor.rain_chance_today': st('90', { unit_of_measurement: '%' }), 'input_number.irrigation_skip_rain_chance': st('60.0', { min: 0, max: 100, step: 5 }),
+  'sensor.rain_since_9am': st('2.4', { unit_of_measurement: 'mm' }), 'input_number.irrigation_skip_rain_fallen': st('5.0', { min: 1, max: 40, step: 1 }),
+  'switch.back_lawn': st('off', { friendly_name: 'Back lawn' }), 'sensor.back_lawn_time_left': st('0', { unit_of_measurement: 's' }), 'sensor.back_lawn_battery': st('60', { unit_of_measurement: '%' }), 'sensor.back_lawn_status': st('idle'),
+  'valve.front_beds': st('closed', { friendly_name: 'Front beds' }), 'sensor.front_beds_time_left': st('0', { unit_of_measurement: 'min' }), 'sensor.front_beds_battery': st('80', { unit_of_measurement: '%' }),
+  'switch.side_path': st('off'), 'switch.orchard': st('off'),
+};
+const ON = id => id.startsWith('valve.') ? 'open' : 'on', OFF = id => id.startsWith('valve.') ? 'closed' : 'off';
+// Seven days of mock history: three runs a day, the second yard waits for the first, one drop mid-run, two outages.
+const mockHist = (startIso, wanted) => {
+  const from = Date.parse(startIso) / 1000, now = Date.now() / 1000, d0 = new Date(); d0.setHours(0, 0, 0, 0); const day = d0.getTime() / 1000;
+  const out = {}; wanted.forEach((id, z) => {
+    const a = [{ s: OFF(id), lu: from }], put = (s, t) => { if (t <= now && t >= from) a.push({ s, lu: t }); };
+    for (let d = 6; d >= 0; d--) {
+      const base = day - d * 86400;
+      [[6, 30], [18, 30]].forEach(([h, m], k) => { if (d === 3 && k === 1) return; const t = base + h * 3600 + m * 60 + z * 920; put(ON(id), t); if (z === 0 && d === 1 && k === 0) { put('unavailable', t + 300); put(ON(id), t + 333); } put(OFF(id), t + 900); });
+      if (z === 0 && d === 4) { const t = base + 21 * 3600; put('unavailable', t); put(OFF(id), t + 12000); }
+    }
+    out[id] = a.sort((x, y) => x.lu - y.lu);
+  });
+  return out;
+};
+const card = document.getElementById('c'); card.setConfig(config);
+const push = () => { card.hass = hass; };
+const set = (id, v, attrs) => { S[id] = st(v, attrs || (S[id] && S[id].attributes) || {}); };
+const startZone = id => { set(id, ON(id)); const z = ZONES[mode].find(x => x.entity === id); if (z && z.remaining) set(z.remaining, S[z.remaining].attributes.unit_of_measurement === 'min' ? 15 : 900); };
+const hass = {
+  states: S,
+  callService(d, s, data) {
+    console.log('service', d, s, JSON.stringify(data)); const id = data.entity_id;
+    if (s === 'toggle') set(id, S[id].state === 'on' ? 'off' : 'on');
+    if (s === 'select_option') set(id, data.option);
+    if (s === 'set_value') set(id, data.value.toFixed(1));
+    if (s === 'turn_on' && d === 'switch' || s === 'open_valve') startZone(id);
+    if (s === 'turn_off' && d === 'switch' || s === 'close_valve') set(id, OFF(id));
+    if (id === 'script.irrigation_run') { const [first, ...rest] = data.variables.zones; set(id, 'on'); set('input_text.irrigation_queue', rest[0] || ''); setTimeout(() => { startZone(first); push(); }, 800); }
+    if (id === 'script.irrigation_start_now') setTimeout(() => { startZone(data.variables.zone); set('input_text.irrigation_queue', ''); push(); }, 1000);
+    if (id === 'script.irrigation_stop') { ids.forEach(z => set(z, OFF(z))); set('script.irrigation_run', 'off'); set('input_text.irrigation_queue', ''); }
+    if (id === 'script.irrigation_skip_today') set('input_datetime.irrigation_hold_until', new Date(Date.now() - new Date().getTimezoneOffset() * 6e4).toISOString().slice(0, 10));
+    if (id === 'script.irrigation_resume') set('input_datetime.irrigation_hold_until', '2026-01-01');
+    push(); return Promise.resolve();
+  },
+  callWS(msg) {
+    if ((msg.entity_ids || []).includes('input_text.irrigation_last_event')) return Promise.resolve({ 'input_text.irrigation_last_event': [{ s: 'Morning run 06:30: Back lawn 15 min, Front beds 15 min', lu: Date.now() / 1000 - 600 }] });
+    return new Promise(r => setTimeout(() => r(mockHist(msg.start_time, msg.entity_ids)), 250));
+  },
+};
+push();
+document.getElementById('bar').addEventListener('click', e => {
+  const m = e.target.dataset.m; if (!m) return;
+  if (m === 'rain') { set('weather.home', 'rainy'); set('sun.sun', 'above_horizon'); }
+  if (m === 'sun') { set('weather.home', 'sunny'); set('sun.sun', 'above_horizon'); }
+  if (m === 'night') { set('weather.home', 'clear-night'); set('sun.sun', 'below_horizon'); }
+  if (m === 'run') { startZone(ids[0]); set('script.irrigation_run', 'on'); set('input_text.irrigation_queue', ids[1] || ''); }
+  if (m === 'idle') { ids.forEach(z => set(z, OFF(z))); set('script.irrigation_run', 'off'); }
+  if (m === 'water') { set('sensor.irrigation_verdict', 'water'); set('sensor.irrigation_reason', 'Water: 0–1 mm forecast today at 30% chance'); set('sensor.rain_forecast_today', '0–1'); set('sensor.rain_chance_today', '30'); set('sensor.rain_since_9am', '0'); }
+  if (m === 'skip') { set('sensor.irrigation_verdict', 'skip'); set('sensor.irrigation_reason', 'Skip: 9–20 mm forecast today at 90% chance'); set('sensor.rain_forecast_today', '9–20'); set('sensor.rain_chance_today', '90'); }
+  push();
+});
+window.__push = push; window.__set = set;
+// For screenshots: ?bare hides the bar, ?m=run|sun|night|water starts in that state, ?hist=N opens yard N's history
+const q = new URLSearchParams(location.search);
+if (q.has('bare')) document.getElementById('bar').style.display = 'none';
+(q.get('m') || '').split(',').filter(Boolean).forEach(m => document.querySelector(`[data-m="${m}"]`).click());
+if (q.has('hist')) setTimeout(() => card.shadowRoot.querySelector(`[data-a="hist"][data-y="${q.get('hist')}"]`).click(), 300);
+</script>

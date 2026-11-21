@@ -9,7 +9,7 @@
    card that turns the switch or valve on and off. Add helpers and scripts and it grows a schedule,
    a season picker, rain rules, a queue and a Start now button. Tap a yard's name for its last
    7 days (running / idle / offline), read from the recorder history of its switch or valve. */
-const VERSION = '1.0.0';
+const VERSION = '1.0.1';
 // Ready-made yard pictures (zones[i].scene). A zone's own `layout` list still wins for the plants.
 //   plants: what grows (lawn = sprayed grass, else drip beds: hedge, rosebed, grasstree, lime/lemon/orange tree)
 //   props:  what stands around it; path: what is laid across the lawn
@@ -303,11 +303,11 @@ const YARD_HTML = (z, i) => {
 const HTML = (E, seasons) => {
   const panes = [];
   if (E.times.length) panes.push(`<section class="pane"><h2>Today</h2>${E.times.map((s, i) => `<div class="row" data-r="${i}"><i class="dot"></i><button class="t" data-a="more" data-e="${esc(s.entity || '')}"></button><div class="d"><b></b><span></span></div></div>`).join('')}</section>`);
-  const two = E.skip && E.hold;
+  const skipBtn = E.skip || (E.hold && E.resume), two = skipBtn && E.hold;
   panes.push(`<section class="pane ctl"><h2>${seasons.length ? 'Season' : 'Water'}</h2>${seasons.length ? `<div class="seg" style="--k:${seasons.length}"><i></i>${seasons.map(s => `<button data-a="season" data-v="${esc(s)}">${esc(s)}</button>`).join('')}</div>` : ''}
     ${E.mins ? `<div class="step"><span class="lab">Per yard</span><span class="pm"><button class="rb" data-a="mins" data-v="-1" aria-label="Fewer minutes">&minus;</button><span class="v" data-k="mins"></span><button class="rb" data-a="mins" data-v="1" aria-label="More minutes">+</button></span></div>` : ''}
     <div class="acts"><button class="btn go" data-a="go"></button><button class="btn stop" data-a="stop" hidden>Stop watering</button>
-    ${E.skip ? `<button class="btn${two ? '' : ' wide'}" data-a="skip">Skip today</button>` : ''}${E.hold ? `<button class="btn${two ? '' : ' wide'}" data-a="more" data-e="${esc(E.hold)}">Hold until&hellip;</button>` : ''}</div></section>`);
+    ${skipBtn ? `<button class="btn${two ? '' : ' wide'}" data-a="skip"${E.skip ? '' : ' hidden'}>Skip today</button>` : ''}${E.hold ? `<button class="btn${two ? '' : ' wide'}" data-a="more" data-e="${esc(E.hold)}">Hold until&hellip;</button>` : ''}</div></section>`);
   if (E.rules.length) panes.push(`<section class="pane"><h2>Rain rules</h2>${E.rules.map((r, i) => `<div class="rule" data-u="${i}"><div class="top"><b>${esc(r.label)}</b><span class="now"></span></div>
     <div class="bar"><u></u><s></s></div><div class="bot"><span class="say"></span>${r.thr ? `<span class="pm"><button class="rb" data-a="thr" data-u="${i}" data-v="-1" aria-label="Lower">&minus;</button><button class="rb" data-a="thr" data-u="${i}" data-v="1" aria-label="Raise">+</button></span>` : ''}</div></div>`).join('')}</section>`);
   return `
@@ -334,7 +334,8 @@ ${E.log || E.hold ? '<div class="foot"><span data-k="last"></span><span data-k="
 </section></div>`;
 };
 
-const clock = t => { if (!t || t.length < 5) return '--'; let h = +t.slice(0, 2), m = t.slice(3, 5); return `${h % 12 || 12}:${m} ${h < 12 ? 'am' : 'pm'}`; };
+const hhmm = t => { const m = /(\d{1,2}):(\d\d)/.exec(String(t == null ? '' : t)); return m ? `${m[1].padStart(2, '0')}:${m[2]}` : ''; };
+const clock = v => { const t = hhmm(v); if (!t) return '--'; let h = +t.slice(0, 2), m = t.slice(3, 5); return `${h % 12 || 12}:${m} ${h < 12 ? 'am' : 'pm'}`; };
 const hm = d => `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 const mmss = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 const tfmt = t => { const d = new Date(t), h = d.getHours(); return `${h % 12 || 12}:${String(d.getMinutes()).padStart(2, '0')} ${h < 12 ? 'am' : 'pm'}`; };
@@ -357,15 +358,15 @@ const normConfig = c => {
   return {
     title: c.title || 'Irrigation',
     full: c.full_height !== false,
-    zones: (Array.isArray(c.zones) ? c.zones : []).slice(0, MAX_ZONES).map((z, i) => ({
-      name: z.name, n: z.name || `Zone ${i + 1}`, sw: z.entity || z.switch || z.valve || '', rem: z.remaining, bat: z.battery, st: z.status, scene: z.scene, layout: z.layout,
+    zones: (Array.isArray(c.zones) ? c.zones : []).map(z => typeof z === 'string' ? { entity: z } : z).filter(z => z && typeof z === 'object').slice(0, MAX_ZONES).map((z, i) => ({
+      name: z.name != null && z.name !== '' ? String(z.name) : undefined, n: z.name != null && z.name !== '' ? String(z.name) : `Zone ${i + 1}`, sw: z.entity || z.switch || z.valve || '', rem: z.remaining, bat: z.battery, st: z.status, scene: z.scene, layout: z.layout,
     })),
     wx: c.weather, sun: c.sun || 'sun.sun', tmax: c.max_temp,
     auto: c.automatic, season: c.season, mins: c.minutes,
-    times: (Array.isArray(c.times) ? c.times : []).map((t, i) => ({ name: t.name || `Run ${i + 1}`, entity: t.entity, time: t.time })),
+    times: (Array.isArray(c.times) ? c.times : []).filter(t => t && typeof t === 'object').map((t, i) => ({ name: t.name != null && t.name !== '' ? String(t.name) : `Run ${i + 1}`, entity: t.entity, time: t.time != null ? String(t.time) : undefined })),
     next: c.next_run, verdict: c.verdict, reason: c.reason, log: c.log, hold: c.hold, queue: c.queue,
     run: scripts.run, stop: scripts.stop, skip: scripts.skip, resume: scripts.resume, startNow: scripts.start_now,
-    rules: (Array.isArray(c.rain_rules) ? c.rain_rules : []).filter(r => r && r.sensor).map(r => ({ label: r.name || 'Rain', val: r.sensor, thr: r.threshold, unit: r.unit, max: +r.max || 0 })),
+    rules: (Array.isArray(c.rain_rules) ? c.rain_rules : []).filter(r => r && r.sensor).map(r => ({ label: r.name != null ? String(r.name) : 'Rain', val: r.sensor, thr: r.threshold, unit: r.unit, max: +r.max || 0 })),
   };
 };
 
@@ -373,7 +374,7 @@ class ArcaneIrrigationCard extends HTMLElement {
   setConfig(c) {
     if (!c || !Array.isArray(c.zones) || !c.zones.length) throw new Error('Add at least one zone under `zones:` (each with an `entity:` switch or valve).');
     this._c = c; this._E = normConfig(c);
-    if (this._built) this._render();
+    if (this._built) { this._render(); if (this._h) this._update(); }
   }
   getCardSize() { return 12; }
   getGridOptions() { return { columns: 'full', min_columns: 6 }; }
@@ -383,7 +384,7 @@ class ArcaneIrrigationCard extends HTMLElement {
     return { zones: (pick.length ? pick : ['']).map((entity, i) => ({ entity, scene: looks[i] })) };
   }
   static getConfigElement() { return document.createElement('arcane-irrigation-card-editor'); }
-  connectedCallback() { this._live = true; if (this._built) this._loop(); }
+  connectedCallback() { this._live = true; if (this._built) { cancelAnimationFrame(this._raf); this._loop(); } }
   disconnectedCallback() { this._live = false; cancelAnimationFrame(this._raf); if (this._built) this._hClose(); }
   set hass(h) { this._h = h; if (!this._built) this._build(); else if (this._needNames()) this._render(); this._update(); }
 
@@ -402,7 +403,7 @@ class ArcaneIrrigationCard extends HTMLElement {
     this._root.addEventListener('click', e => { const b = e.target.closest('[data-a]'); if (b) this._act(b, e); });
     this._still = matchMedia('(prefers-reduced-motion: reduce)').matches;
     this._render();
-    if (this._live !== false) { this._live = true; this._loop(); }
+    if (this.isConnected) { this._live = true; cancelAnimationFrame(this._raf); this._loop(); }
   }
   _render() {
     if (this._hy != null) this._hClose();
@@ -446,14 +447,14 @@ class ArcaneIrrigationCard extends HTMLElement {
     }
     else if (a === 'thr') {
       const r = E.rules[+b.dataset.u], lo = +this._a(r.thr, 'min') || 0, hi = this._a(r.thr, 'max') != null ? +this._a(r.thr, 'max') : 100, st = +this._a(r.thr, 'step') || 1;
-      this._call(r.thr.split('.')[0], 'set_value', { entity_id: r.thr, value: Math.min(hi, Math.max(lo, this._n(r.thr) + v * st)) });
+      this._call(r.thr.split('.')[0], 'set_value', { entity_id: r.thr, value: Math.min(hi, Math.max(lo, this._n(r.thr, lo) + v * st)) });
     }
     else if (a === 'more') { if (b.dataset.e) this.dispatchEvent(new CustomEvent('hass-more-info', { bubbles: true, composed: true, detail: { entityId: b.dataset.e } })); }
     else if (a === 'stop') this._stopAll();
     else if (a === 'skip') this._script(this._held && E.resume ? E.resume : E.skip);
     else if (a === 'zone' || a === 'sel') {
       // Tap a yard to light it up (or put it out); Water now then runs whatever is lit.
-      const i = +b.dataset.y; if (!E.zones[i].sw) return;
+      const i = +b.dataset.y, zi = E.zones[i]; if (!zi.sw || (!this._running[i] && (OFFLINE(this._s(zi.sw)) || (zi.st && OFFLINE(this._s(zi.st)))))) return;
       if (this._running[i]) { if (a === 'zone') { if (E.stop && this._running.filter(Boolean).length === 1) this._script(E.stop); else this._zoneSet(i, false); } return; }
       // While another yard waters, this yard's button is Start now (runs it alongside, out of the queue).
       if (this._running.some(Boolean)) {
@@ -503,7 +504,7 @@ class ArcaneIrrigationCard extends HTMLElement {
     const h = this._h, E = this._E; if (!h) return;
     const opts = this._a(E.season, 'options');
     if (JSON.stringify(opts || null) !== this._seasonsFor) { this._render(); }
-    const season = this._s(E.season), auto = E.auto ? this._s(E.auto) === 'on' : null, verdict = this._s(E.verdict);
+    const season = this._s(E.season), autoS = this._s(E.auto), auto = E.auto && !OFFLINE(autoS) ? autoS === 'on' : null, verdict = this._s(E.verdict);
     const reason = (this._s(E.reason) || '').replace(/^(Skip|Water)\s*:\s*/i, '');
     const water = verdict === undefined ? null : /^(water|on|true|yes)/i.test(verdict);
     const running = E.zones.map(z => ZK(this._s(z.sw)) === 'run'), any = running.some(Boolean);
@@ -569,8 +570,8 @@ class ArcaneIrrigationCard extends HTMLElement {
       const nowHM = hm(new Date());
       let nextMarked = false;
       E.times.forEach((tc, i) => {
-        const row = this._root.querySelector(`[data-r="${i}"]`), t = (tc.entity ? this._s(tc.entity) : tc.time) || '', dot = row.querySelector('.dot');
-        const ok5 = /^\d\d:\d\d/.test(t), past = ok5 && t.slice(0, 5) <= nowHM, rec = this._hist[tc.name];
+        const row = this._root.querySelector(`[data-r="${i}"]`), t = hhmm(tc.entity ? this._s(tc.entity) : tc.time), dot = row.querySelector('.dot');
+        const ok5 = !!t, past = ok5 && t <= nowHM, rec = this._hist[tc.name];
         let cls = '', s = '';
         if (!ok5) s = 'No time set';
         else if (past) {
@@ -602,14 +603,14 @@ class ArcaneIrrigationCard extends HTMLElement {
     go.hidden = any; this._root.querySelector('.stop').hidden = !any;
     const hd = this._s(E.hold), held = !!hd && /^\d{4}-\d\d-\d\d/.test(hd) && hd.slice(0, 10) >= new Date(Date.now() - new Date().getTimezoneOffset() * 6e4).toISOString().slice(0, 10);
     this._held = held;
-    const skb = this._root.querySelector('[data-a="skip"]'); if (skb) this._text(skb, held && E.resume ? 'Clear the hold' : 'Skip today');
+    const skb = this._root.querySelector('[data-a="skip"]'); if (skb) { this._text(skb, held && E.resume ? 'Clear the hold' : 'Skip today'); skb.hidden = !E.skip && !(held && E.resume); }
     const hel = this._q('hold');
     if (hel) { this._text(hel, held ? `On hold through ${new Date(+hd.slice(0, 4), +hd.slice(5, 7) - 1, +hd.slice(8, 10)).toLocaleDateString()}` : ''); hel.className = held ? 'hold' : ''; }
     // rain rules
     E.rules.forEach((r, i) => {
       const el = this._root.querySelector(`.rule[data-u="${i}"]`), raw = this._s(r.val) || '';
       const unit = r.unit != null ? r.unit : (this._a(r.val, 'unit_of_measurement') || ''), sp = unit && unit !== '%' ? ' ' : '';
-      const val = parseFloat(raw.replace(/[–—]/g, '-').split(/-(?=\d)/).pop()), thr = r.thr ? this._n(r.thr) : NaN, ok = !isNaN(val);
+      const val = parseFloat(raw.replace(/[–—]/g, '-').split(/-(?=\d)/).pop()), thr = r.thr ? this._n(r.thr, NaN) : NaN, ok = !isNaN(val);
       const max = r.max || (unit === '%' ? 100 : Math.max(10, (isNaN(thr) ? 0 : thr) * 2.5, ok ? val : 0));
       this._text(el.querySelector('.now'), ok ? `${/[–—-]/.test(raw.trim().slice(1)) ? raw : Math.round(val * 10) / 10}${sp}${unit}` : 'No reading');
       el.querySelector('u').style.width = `${ok ? Math.min(100, val / max * 100) : 0}%`;
@@ -743,7 +744,7 @@ class ArcaneIrrigationCard extends HTMLElement {
 
   _loop() {
     if (!this._live || !this._cv) return;
-    this._raf = requestAnimationFrame(() => this._loop());
+    cancelAnimationFrame(this._raf); this._raf = requestAnimationFrame(() => this._loop());
     const cv = this._cv, r = cv.getBoundingClientRect(); if (!r.width) return;
     const dpr = Math.min(2, devicePixelRatio || 1);
     if (cv.width !== Math.round(r.width * dpr)) { cv.width = Math.round(r.width * dpr); cv.height = Math.round(r.height * dpr); }
@@ -805,6 +806,7 @@ class ArcaneIrrigationCardEditor extends HTMLElement {
     }
     const looks = Object.entries(SCENES).map(([value, s]) => ({ value, label: s.label }));
     const zones = this._zones(), count = Math.max(1, zones.length);
+    if (this._open0 === undefined) this._open0 = !(zones[0] || {}).entity; // decided once, so the panel doesn't snap shut while filling it in
     const zoneSchema = z => [
       { ...ent('entity', 'Switch or valve', ['switch', 'valve']), required: true },
       { name: 'name', label: 'Name', selector: { text: {} } },
@@ -817,7 +819,7 @@ class ArcaneIrrigationCardEditor extends HTMLElement {
     this._f.schema = [
       { name: 'title', label: 'Title', selector: { text: {} } },
       { name: 'count', label: 'Number of yards', selector: { select: { mode: 'dropdown', options: ['1', '2', '3', '4'].map(v => ({ value: v, label: v })) } } },
-      ...Array.from({ length: count }, (_, i) => { const z = zones[i] || {}; return { type: 'expandable', name: `zone_${i}`, title: `Yard ${i + 1}${z.name ? `: ${z.name}` : ''}`, expanded: i === 0 && !z.entity, schema: zoneSchema(z) }; }),
+      ...Array.from({ length: count }, (_, i) => { const z = zones[i] || {}; return { type: 'expandable', name: `zone_${i}`, title: `Yard ${i + 1}${z.name ? `: ${z.name}` : ''}`, expanded: i === 0 && this._open0, schema: zoneSchema(z) }; }),
       { type: 'expandable', name: 'g_wx', flatten: true, title: 'Weather (optional)', schema: [ent('weather', 'Weather', 'weather'), ent('sun', 'Sun (default sun.sun)', 'sun'), ent('max_temp', "Today's top temperature", 'sensor')] },
       { type: 'expandable', name: 'g_sched', flatten: true, title: 'Schedule helpers (optional)', schema: [
         ent('automatic', 'Automatic on/off', 'input_boolean'), ent('season', 'Season', ['input_select', 'select']), ent('minutes', 'Minutes per yard', ['input_number', 'number']),

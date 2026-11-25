@@ -9,7 +9,7 @@
    card that turns the switch or valve on and off. Add helpers and scripts and it grows a schedule,
    a season picker, rain rules, a queue and a Start now button. Tap a yard's name for its last
    7 days (running / idle / offline), read from the recorder history of its switch or valve. */
-const VERSION = '1.0.1';
+const VERSION = '1.1.0';
 // Ready-made yard pictures (zones[i].scene). A zone's own `layout` list still wins for the plants.
 //   plants: what grows (lawn = sprayed grass, else drip beds: hedge, rosebed, grasstree, lime/lemon/orange tree)
 //   props:  what stands around it; path: what is laid across the lawn
@@ -247,6 +247,14 @@ h4{margin:20px 0 2px;font-size:12px;letter-spacing:.18em;text-transform:uppercas
 .ev .tx{min-width:0}.ev .tx b{display:block;color:var(--ink);font-weight:600}.ev .tx span{display:block;color:var(--muted);font-size:13.5px}
 .ev li.blip .tm,.ev li.blip .tx b{color:var(--muted);font-weight:500}
 .ev li.none{display:block;color:var(--muted);padding:12px 2px}
+.hbat{margin:-4px 0 18px;background:rgba(255,255,255,.05);border:1px solid var(--line);border-radius:16px;padding:12px 14px 8px}
+.hbat:empty{display:none}
+.hbat .bt{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
+.hbat .bt .k{font-size:11.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--muted);font-weight:600;white-space:nowrap}
+.hbat .bt b{font:600 17px/1.2 -apple-system,"SF Pro Display","Segoe UI Variable Display",system-ui,sans-serif;color:var(--ink);font-variant-numeric:tabular-nums}
+.hbat .bt span{font-size:13px;color:var(--muted)}.hbat .bt .low{color:var(--danger)}
+.hbat svg{display:block;width:100%;height:64px;margin-top:8px;overflow:visible}
+.hbat .ax{display:flex;justify-content:space-between;font-size:11.5px;color:var(--muted);margin-top:4px}
 .hs-note{margin:12px 2px 0;color:var(--muted);font-size:13px;line-height:1.5}
 @keyframes sheet{from{transform:translateY(40%);opacity:0}}
 @media (max-width:900px){.grid,.grid.p1,.grid.p2{grid-template-columns:1fr}.head{right:8%}.wx{top:auto;bottom:160px;left:20px;right:auto}.yards{gap:14px}
@@ -328,6 +336,7 @@ ${E.log || E.hold ? '<div class="foot"><span data-k="last"></span><span data-k="
   <button class="hs-x" data-a="hclose" aria-label="Close">&times;</button></div>
   ${E.zones.length > 1 ? `<div class="seg two" style="--k:${E.zones.length}"><i></i>${E.zones.map((z, i) => `<button data-a="hyard" data-y="${i}">${esc(z.n)}</button>`).join('')}</div>` : ''}
   <div class="hsum" data-k="hsum"></div>
+  <div class="hbat" data-k="hbat"></div>
   <div class="hdays" data-k="hdays"></div>
   <h4 data-k="hdl"></h4><ul class="ev" data-k="hev"></ul>
   <p class="hs-note" data-k="hnote"></p>
@@ -641,12 +650,36 @@ class ArcaneIrrigationCard extends HTMLElement {
   }
   _hDays(now) { const n = new Date(now); return Array.from({ length: HIST_DAYS }, (_, d) => ({ ds: new Date(n.getFullYear(), n.getMonth(), n.getDate() - d).getTime(), de: new Date(n.getFullYear(), n.getMonth(), n.getDate() - d + 1).getTime() })); }
   async _hLoad() {
-    const seq = this._hSeq = (this._hSeq || 0) + 1, from = this._hDays(Date.now())[HIST_DAYS - 1].ds, ids = this._E.zones.map(z => z.sw).filter(Boolean);
+    const seq = this._hSeq = (this._hSeq || 0) + 1, from = this._hDays(Date.now())[HIST_DAYS - 1].ds, ids = [...new Set(this._E.zones.flatMap(z => [z.sw, z.bat]).filter(Boolean))];
     try {
       const res = await this._h.callWS({ type: 'history/history_during_period', start_time: new Date(from).toISOString(), entity_ids: ids, minimal_response: true, no_attributes: true, significant_changes_only: false });
-      if (seq === this._hSeq) this._hData = { from, rows: this._E.zones.map(z => (z.sw && res[z.sw]) || []) };
+      if (seq === this._hSeq) this._hData = { from, rows: this._E.zones.map(z => (z.sw && res[z.sw]) || []), bats: this._E.zones.map(z => z.bat ? this._hBat(res[z.bat] || []) : null) };
     } catch (e) { if (seq === this._hSeq) this._hData = { err: true }; }
     if (seq === this._hSeq) this._hRender();
+  }
+  // battery rows -> [{t, v}] readings, numbers only (unavailable while offline is skipped)
+  _hBat(rows) {
+    return rows.map(x => { const s = x.s !== undefined ? x.s : x.state, ts = x.lu || x.lc; return { t: ts ? ts * 1000 : Date.parse(x.last_updated || x.last_changed), v: parseFloat(s) }; })
+      .filter(p => !isNaN(p.v) && !isNaN(p.t)).sort((a, b) => a.t - b.t);
+  }
+  // last battery reading at or before t (else the first one after)
+  _batAt(pts, t) { if (!pts || !pts.length) return null; let v = pts[0].v; for (const p of pts) { if (p.t > t) break; v = p.v; } return v; }
+  // the battery panel: a 7-day line, offline stretches shaded behind it
+  _hBatHtml(pts, sg, from, now, cur) {
+    if (!pts) return '';
+    if (!pts.length) return `<div class="bt"><span class="k">Battery</span><span>No readings in the last ${HIST_DAYS} days</span></div>`;
+    const W = 700, H = 64, x = t => ((Math.max(from, t) - from) / (now - from) * W).toFixed(1), y = v => (H - Math.max(0, Math.min(100, v)) / 100 * H).toFixed(1);
+    let d = `M${x(pts[0].t)} ${y(pts[0].v)}`;
+    pts.forEach((p, j) => { if (j) d += ` H${x(p.t)} V${y(p.v)}`; });
+    d += ` H${W}`;
+    const offs = sg.filter(g => g.k === 'off').map(g => `<rect x="${x(g.a)}" y="0" width="${Math.max(1.5, x(g.b) - x(g.a))}" height="${H}" fill="rgba(255,143,133,.28)"/>`).join('');
+    const last = pts[pts.length - 1].v, lo = Math.min(...pts.map(p => p.v)), first = pts[0].v;
+    const trend = lo === last && first === last ? `Steady all week` : first > last ? `Down from ${Math.round(first)}%` : `Lowest ${Math.round(lo)}%`;
+    return `<div class="bt"><span class="k">Battery</span><span><b class="${last < 25 ? 'low' : ''}">${Math.round(last)}%</b> ${cur ? 'now' : 'last reading'} · ${trend}</span></div>
+      <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-label="Battery over the last ${HIST_DAYS} days">${offs}
+      <line x1="0" x2="${W}" y1="${y(25)}" y2="${y(25)}" stroke="rgba(255,143,133,.5)" stroke-dasharray="4 5" vector-effect="non-scaling-stroke"/>
+      <path d="${d}" fill="none" stroke="var(--ok)" stroke-width="2.2" vector-effect="non-scaling-stroke"/></svg>
+      <div class="ax"><span>${this._hDayName(from, HIST_DAYS - 1)}</span><span>Red = offline · dashed = 25%</span><span>Now</span></div>`;
   }
   // history rows -> back-to-back spans {k: run|idle|off, a, b, live}
   _hSegs(rows, from, now) {
@@ -681,14 +714,15 @@ class ArcaneIrrigationCard extends HTMLElement {
     const E = this._E, i = this._hy, z = E.zones[i], now = Date.now(), days = this._hDays(now), st = this._h.states[z.sw], k0 = ZK(st && st.state);
     this._text(this._q('ht'), `${z.n} ${k0 === 'run' ? 'is watering' : k0 === 'idle' ? 'is idle' : 'is offline'}`);
     const lc = st && Date.parse(st.last_changed);
-    this._text(this._q('hsince'), lc ? `Since ${this._hWhen(lc, now, true)}` : '');
+    const bpts = this._hData && this._hData.bats ? this._hData.bats[i] : null, bnow = this._batAt(bpts, lc || now);
+    this._text(this._q('hsince'), lc ? `Since ${this._hWhen(lc, now, true)}${k0 === 'off' && bnow != null ? ` · battery read ${Math.round(bnow)}% just before` : ''}` : '');
     const sgi = this._root.querySelector('.seg.two i'); if (sgi) sgi.style.transform = `translateX(${i * 100}%)`;
     this._root.querySelectorAll('[data-a="hyard"]').forEach(b => b.classList.toggle('on', +b.dataset.y === i));
     const { ds, de } = days[this._hd], end = Math.min(de, now), d = this._hData;
     const sum = this._q('hsum'), list = this._q('hdays'), evl = this._q('hev'), note = this._q('hnote');
     this._text(this._q('hdl'), this._hDayName(ds, this._hd, true));
     if (!d || d.err) {
-      sum.innerHTML = ''; list.innerHTML = ''; note.textContent = '';
+      sum.innerHTML = ''; list.innerHTML = ''; note.textContent = ''; this._q('hbat').innerHTML = '';
       evl.innerHTML = `<li class="none">${d ? 'Couldn’t load the history. Close this and try again.' : 'Loading…'}</li>`;
       return;
     }
@@ -705,6 +739,7 @@ class ArcaneIrrigationCard extends HTMLElement {
       ['idle', 'Idle', dur(tot.idle), known ? `${Math.round(tot.idle / known * 100)}% of the time` : ''],
       ['off', 'Offline', tot.off ? dur(tot.off) : 'Never', offs ? `${offs} time${offs > 1 ? 's' : ''}` : 'Always in reach'],
     ].map(([k, l, v, t]) => `<div class="tile"><div class="k"><i class="kd ${k}"></i>${l}</div><div class="v">${v}</div><div class="s">${t}</div></div>`).join('');
+    this._q('hbat').innerHTML = this._hBatHtml(bpts, sg, d.from, now, k0 !== 'off');
     list.innerHTML = `<div class="hax"><i></i><span>${['12am', '6am', '12pm', '6pm', '12am'].map((l, j) => `<em style="left:${j * 25}%">${l}</em>`).join('')}</span></div>` + days.map((dy, m) => {
       const e2 = Math.min(dy.de, now), span = dy.de - dy.ds; let runMs = 0;
       const bars = sg.filter(g => g.b > dy.ds && g.a < e2).map(g => {
@@ -719,12 +754,14 @@ class ArcaneIrrigationCard extends HTMLElement {
     else evl.innerHTML = evs.map(e => {
       const len = dur((e.live ? now : e.b) - e.a), until = `Until ${this._hWhen(e.b, e.a)} · ${len}`;
       const [title, detail] = e.k === 'run' ? [e.live ? 'Watering now' : 'Watered', (e.live ? `${len} so far` : until) + (e.lost ? ` · lost contact for ${dur(e.lost)}` : '')]
-        : e.k === 'off' ? [e.live ? 'Offline now' : 'Offline', e.live ? `${len} so far` : until]
+        : e.k === 'off' ? [e.live ? 'Offline now' : 'Offline', (e.live ? `${len} so far` : until) + (this._batAt(bpts, e.a) != null ? ` · battery ${Math.round(this._batAt(bpts, e.a))}%` : '')]
         : ['Brief drop', `All yards at once, back in ${len}`];
       return `<li class="${e.k}"><i class="kd ${e.k}"></i><span class="tm">${tfmt(e.a)}${e.a < ds ? `<small>${DAYS[new Date(e.a).getDay()]}</small>` : ''}</span><span class="tx"><b>${title}</b><span>${detail}</span></span></li>`;
     }).join('');
     const fd = new Date(first);
+    const lastOff = [...ev].reverse().find(e => e.k === 'off'), bOff = lastOff ? this._batAt(bpts, lastOff.a) : null;
     note.textContent = 'Offline means Home Assistant couldn’t reach the controller.'
+      + (bOff == null ? '' : bOff >= 25 ? ` The battery read ${Math.round(bOff)}% just before it last went offline, so it was more likely out of reach (signal) than flat.` : ` The battery was low (${Math.round(bOff)}%) just before it last went offline: try fresh batteries first.`)
       + (blips ? ' Brief drops hit every yard at the same moment, so they come from Home Assistant’s side, not the yard, and aren’t counted as offline.' : '')
       + (first > days[HIST_DAYS - 1].ds && first < Infinity ? ` Records for ${z.n} start ${DAYS[fd.getDay()]} ${fd.getDate()} ${MONTHS[fd.getMonth()]}, ${tfmt(first)}.` : '');
   }

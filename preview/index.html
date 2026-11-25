@@ -65,7 +65,14 @@ const ON = id => id.startsWith('valve.') ? 'open' : 'on', OFF = id => id.startsW
 // Seven days of mock history: three runs a day, the second yard waits for the first, one drop mid-run, two outages.
 const mockHist = (startIso, wanted) => {
   const from = Date.parse(startIso) / 1000, now = Date.now() / 1000, d0 = new Date(); d0.setHours(0, 0, 0, 0); const day = d0.getTime() / 1000;
-  const out = {}; wanted.forEach((id, z) => {
+  const out = {}; wanted.filter(id => /battery/.test(id)).forEach((id, z) => {
+    // battery: a reading every 6 h, slowly falling, nothing while the yard was offline
+    const a = [];
+    for (let t = from; t <= now; t += 6 * 3600) a.push({ s: String(Math.round((z ? 80 : 75) - (t - from) / 86400 * (z ? 1 : 3))), lu: t });
+    out[id] = a;
+  });
+  wanted = wanted.filter(id => !/battery/.test(id));
+  wanted.forEach((id, z) => {
     const a = [{ s: OFF(id), lu: from }], put = (s, t) => { if (t <= now && t >= from) a.push({ s, lu: t }); };
     for (let d = 6; d >= 0; d--) {
       const base = day - d * 86400;

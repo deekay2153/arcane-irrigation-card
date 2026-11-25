@@ -207,7 +207,7 @@ rain_rules:
 
 ## History
 
-Tap a yard's name to open the last 7 days. Each day is a strip: blue while watering, grey while idle, red while offline. It reads Home Assistant's own history of the switch or valve, so it needs the recorder (on by default) and keeps whatever your recorder keeps. Very short drops that hit every yard at the same moment are shown as **Brief drop** and not counted as offline: those come from Home Assistant's side (a restart or reload), not the yard.
+Tap a yard's name to open the last 7 days. Each day is a strip: blue while watering, grey while idle, red while offline. If the yard has a `battery` sensor, a battery line for the same 7 days sits above the strips, with the offline stretches shaded red behind it. Each offline entry shows what the battery read just before, so you can tell a flat battery from a yard that is simply out of Bluetooth range. It reads Home Assistant's own history of the switch or valve, so it needs the recorder (on by default) and keeps whatever your recorder keeps. Very short drops that hit every yard at the same moment are shown as **Brief drop** and not counted as offline: those come from Home Assistant's side (a restart or reload), not the yard.
 
 ## Try it without Home Assistant
 
